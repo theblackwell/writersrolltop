@@ -36,11 +36,11 @@ attachments.json
 attachments/<sha256>.<extension>
 ```
 
-- `manuscript/scenes/<scene id>.json` exists only for a scene that has saved text. `<scene id>` is the node id, lower case.
+- `manuscript/scenes/<scene id>.json` is written by the Apple code only for a scene that has saved text. `<scene id>` is the node id, lower case. **Open point:** spec 4.2 says scene text is made with its scene, which would mean one file per scene; the Apple code and spec differ here until the owner rules.
 - Items in the book's Trash are included, marked with `deletedAt`, so a live record that points at a trashed one still resolves and Restore still works after an import.
 - Not included: scene history, conflict copies, sync state, device settings.
 - The Apple code stores entries without compression. Readers must accept compressed entries.
-- In milestone 1 the `bible/*.json` files and `notes.json` are always `[]`, because those record types do not exist yet. The Apple reader refuses a file where one of them holds records, and refuses a file whose manifest lists a path outside this layout. **Open point:** what a reader does with such files once they exist is decided in the spec before it is built.
+- In milestone 1 the `bible/*.json` files and `notes.json` are always `[]`, because those record types do not exist yet. The Apple reader refuses a file where one of them holds records. It also refuses a file that holds a path outside this layout (even when the manifest lists it), and an attachment file that no attachment record uses. **Open point (awaiting the owner):** whether unknown paths are refused, and what a reader does with bible and notes records once they exist; it is decided in the spec before it is built.
 
 ### 2.1 `manifest.json`
 
@@ -170,7 +170,11 @@ A part sits at the top level and holds chapters; a chapter sits at the top level
 
 Not written to archives or backups. Its fields in the Apple code, for sync: `id`, `sceneId`, `bookId`, `document`, `deviceName`, `createdAt` (conflict copies carry `createdAt` only).
 
-### 4.8 Order keys
+### 4.8 Fields of the spec not yet present
+
+**Open point:** spec 4.3 lists fields that the milestone 1 records do not have yet. Book: cover image, overview (logline, premise, themes, arcs, principles), target word count, daily word goal, `carriedFrom`. Node: point-of-view entry, setting entry, planned words, planned beats. They arrive with the milestones that build them; until then a file carrying them keeps them as unknown fields.
+
+### 4.9 Order keys
 
 `orderKey` is a text key that sorts siblings in plain byte order; equal keys sort by id. The Apple code writes keys of the digits `0-9A-Za-z` (ASCII order) that do not end in `0`. **Open point:** whether other editions must use the same key scheme, or only keep keys they read in order.
 
@@ -186,7 +190,7 @@ A run is an object: `text` (string), and optional `bold`, `italic`, `underline` 
 
 Nothing else is stored: no fonts, sizes, colours or alignment.
 
-The Apple code stores a document in a normalized form: adjacent runs with the same marks, `entryId` and unknown fields are merged, and a run with empty text and no unknown fields is dropped.
+The Apple editor saves a document in a normalized form (adjacent runs with the same marks, `entryId` and unknown fields are merged; a run with empty text and no unknown fields is dropped). A reader keeps a document exactly as given and does not normalize it.
 
 ### 5.2 Word count
 
@@ -202,14 +206,17 @@ The scene's text is its blocks' runs joined, with blocks separated by a line bre
 
 A reader keeps every field it does not know and writes it back unchanged: on every record in the lists and files above, on a scene's `document`, on each block and on each run. The Apple code keeps them in the stored JSON of each record, so they survive the database, a backup and sync.
 
-Not covered by this rule in the Apple reader: the `manifest.json` object and the `book.json` wrapper (section 2.2).
+Not covered by this rule in the Apple reader: the `manifest.json` object, the `book.json` wrapper (section 2.2) and the `library.json` wrapper (section 3).
 
 ## 7. Safety limits
 
 A file is checked completely before anything is stored, and an import is all or nothing.
 
 - A ZIP path that is absolute, contains `..` (or an empty or `.` part), contains a backslash or a drive prefix, or is a link is refused. A repeated entry name is refused.
-- More than 100,000 files, more than 2 GB (2,000,000,000 bytes) unpacked, or a compression ratio over 100 to 1 is refused. The Apple code applies the limits across a backup and every book inside it together, counts the bytes that actually come out rather than the sizes the file declares, and does not judge the ratio of a file or archive under 1,000,000 bytes. **Open point:** the spec gives no minimum size for the ratio rule; 1,000,000 bytes is the Apple code's choice.
+- More than 100,000 files, more than 2 GB (2,000,000,000 bytes) unpacked, or a compression ratio over 100 to 1 is refused. What the Apple code does today: the file count and the unpacked byte count are totals across a backup and every book inside it; the bytes counted are those that actually come out, not the sizes the file declares; the ratio is judged for each file and for each ZIP archive on its own (the outer backup, and each book archive), not for the backup as a whole, and not at all for a file or archive under 1,000,000 bytes. **Open point (awaiting the owner):** the whole-backup ratio, the 1,000,000-byte exemption (the spec gives no minimum) and the 2 GB total.
 - Every checksum in the manifest must match, in both directions: every listed file must be present, and every file present must be listed. An attachment file's bytes must hash to the `sha256` in its name and record.
-- Every reference inside the book must resolve to a record in the file: every `parentId`; every scene file's `nodeId` (it must be a scene node of the book); every attachment record's file; the book's shelf. Every record's `bookId` must be the manifest's `bookId`.
-- Each record must have its required fields with the right types and enum values, and each id, time and hash must be in the forms of section 1 and 4.6. **Open point:** the JSON Schema that spec 7.4 asks for is not written yet.
+- Every reference inside the book must resolve to a record in the file (a record in the Trash counts). Checked: every node's `parentId`; every scene file's `nodeId` (it must be a scene node of the book, and equal the file name); every run's `entryId` (it must be the id of an entry in `bible/entries.json`, which is empty in milestone 1, so any `entryId` is refused); every attachment record's file; the book's shelf, which must be one of the shelves in `library.json`. Every record's `bookId` must be the manifest's `bookId`.
+- The manuscript must follow the rules of section 4.4, trashed nodes included: a part at the top level, a chapter at the top level or in a part, a scene in a chapter. A reader refuses a tree that breaks them.
+- `library.json` must hold exactly one shelf of kind `standAlone`.
+- No id may repeat: not between shelves, not between books, and not between nodes or attachment records of different books of one backup (a repeat would overwrite another book's record).
+- Each record must have its required fields with the right types and enum values. Times and hashes must be in the forms of sections 1 and 4.6. Ids in records are read in any letter case and always written back lower case; ids in `manifest.json`, `book.json`'s `shelf`, and file names must already be lower case. **Open point:** whether a reader should refuse an upper-case id in a record, and the JSON Schema that spec 7.4 asks for, are not settled or written yet.
