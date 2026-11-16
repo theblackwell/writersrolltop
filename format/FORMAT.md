@@ -40,7 +40,7 @@ attachments/<sha256>.<extension>
 - Items in the book's Trash are included, marked with `deletedAt`, so a live record that points at a trashed one still resolves and Restore still works after an import.
 - Not included: scene history, conflict copies, sync state, device settings.
 - The Apple code stores entries without compression. Readers must accept compressed entries.
-- In milestone 1 the `bible/*.json` files and `notes.json` are always `[]`, because those record types do not exist yet. The Apple reader refuses a file where one of them holds records. It also refuses a file that holds a path outside this layout (even when the manifest lists it), and an attachment file that no attachment record uses. **Open point (awaiting the owner):** whether unknown paths are refused, and what a reader does with bible and notes records once they exist; it is decided in the spec before it is built.
+- In milestone 1 the `bible/*.json` files and `notes.json` are always `[]`, because those record types do not exist yet. An app refuses a file that holds anything it cannot keep (spec 7.5): the Apple reader refuses a file where one of those lists holds records, a file that holds a path outside this layout (even when the manifest lists it), and an attachment file that no attachment record uses. Nothing is dropped.
 
 ### 2.1 `manifest.json`
 
@@ -62,7 +62,7 @@ A file made by a newer format version than the reader understands is refused wit
 An object with two parts:
 
 - `book`: the complete book record (section 4.3).
-- `shelf`: `id` (string), `kind` (`series` or `standAlone`), `title` (string), `orderKey` (string): the shelf the book was on and its position among shelves.
+- `shelf`: `id` (string), `kind` (`series` or `standAlone`), `title` (string), `orderKey` (string): the shelf the book was on and its position among shelves. Left out for a book in the Trash whose shelf is gone (section 7).
 
 `carriedFrom` is a field of the book record. The book record has no such field in milestone 1; if a file carries one, it is an unknown field and is kept (section 6).
 
@@ -213,9 +213,10 @@ Not covered by this rule in the Apple reader: the `manifest.json` object, the `b
 A file is checked completely before anything is stored, and an import is all or nothing.
 
 - A ZIP path that is absolute, contains `..` (or an empty or `.` part), contains a backslash or a drive prefix, or is a link is refused. A repeated entry name is refused.
-- More than 100,000 files, more than 2 GB (2,000,000,000 bytes) unpacked, or a compression ratio over 100 to 1 is refused. What the Apple code does today: the file count and the unpacked byte count are totals across a backup and every book inside it; the bytes counted are those that actually come out, not the sizes the file declares; the ratio is judged for each file and for each ZIP archive on its own (the outer backup, and each book archive), not for the backup as a whole, and not at all for a file or archive under 1,000,000 bytes. **Open point (awaiting the owner):** the whole-backup ratio, the 1,000,000-byte exemption (the spec gives no minimum) and the 2 GB total.
+- Limits (spec 7.4). More than 100,000 files, more than 2 GB unpacked, or a compression ratio over 100 to 1 is refused. In a library backup: the 100,000-file limit counts every file in the backup, including those inside its books; the 2 GB limit (2,000,000,000 bytes) applies to each book on its own, and the backup as a whole has no size limit; the ratio is checked for each book (what it unpacks to against the size of its `.rolltop` file) and for the backup as a whole (library.json and every file inside every book against the size of the backup file). The ratio rule applies only to a book or backup that unpacks to more than 1,000,000 bytes; the size limits still apply to small ones. The Apple code counts the bytes that actually come out, not only the sizes the file declares.
 - Every checksum in the manifest must match, in both directions: every listed file must be present, and every file present must be listed. An attachment file's bytes must hash to the `sha256` in its name and record.
 - Every reference inside the book must resolve to a record in the file (a record in the Trash counts). Checked: every node's `parentId`; every scene file's `nodeId` (it must be a scene node of the book, and equal the file name); every run's `entryId` (it must be the id of an entry in `bible/entries.json`, which is empty in milestone 1, so any `entryId` is refused); every attachment record's file; the book's shelf, which must be one of the shelves in `library.json`. Every record's `bookId` must be the manifest's `bookId`.
+- **An item in the Trash whose container is gone.** Sync can leave an item in the Trash whose chapter, part or shelf was deleted forever on another device. Such an item is not a broken reference: it is written to archives and backups and comes back in the Trash. A node with `deletedAt` may have a `parentId` that is not in `nodes.json`; a book with `deletedAt` may have a `shelfId` that is not in `library.json`, and then `book.json` has no `shelf` part. A node or book without `deletedAt` must still resolve. The manuscript rule below still applies to a node whose parent is present.
 - The manuscript must follow the rules of section 4.4, trashed nodes included: a part at the top level, a chapter at the top level or in a part, a scene in a chapter. A reader refuses a tree that breaks them.
 - `library.json` must hold exactly one shelf of kind `standAlone`.
 - No id may repeat: not between shelves, not between books, and not between nodes or attachment records of different books of one backup (a repeat would overwrite another book's record).
